@@ -2,5 +2,6 @@ numpy
 opencv-python
 pyyaml
 h5py
+hdf5plugin
 numba
 seaborn
