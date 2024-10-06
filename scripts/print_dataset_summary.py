@@ -29,5 +29,5 @@ if __name__ == '__main__':
         raise ValueError("Invalid mode. Choose from 'train', 'val', or 'test'.")
 
     # DSECDetクラスにmodeに基づいたsplitを設定してインスタンスを作成
-    dataset = DSECDet(args.dsec_merged, split=chosen_split, sync="back", debug=True)
+    dataset = DSECDet(args.dsec_merged, split_config=chosen_split, sync="back", debug=True)
     dataset.print_summary()
