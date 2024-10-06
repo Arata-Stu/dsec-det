@@ -10,7 +10,7 @@ from dsec_det.label import CLASSES
 
 
 class DSECDet:
-    def __init__(self, root: Path, split: str="train", sync: str="front", debug: bool=False, split_config=None):
+    def __init__(self, root, split_config, sync: str="front", debug: bool=False):
         """
         root: Root to the the DSEC dataset (the one that contains 'train' and 'test'
         split: Can be one of ['train', 'test']
@@ -38,14 +38,12 @@ class DSECDet:
         
         """
         assert root.exists()
-        assert split in ['train', 'test', 'val']
-        assert (root / split).exists()
         assert sync in ['front', 'back']
 
         self.debug = debug
         self.classes = CLASSES
 
-        self.root = root / ("train" if split in ['train', 'val'] else "test")
+        self.root = root 
         self.sync = sync
 
         self.height = 480
@@ -54,19 +52,20 @@ class DSECDet:
         self.directories = dict()
         self.img_idx_track_idxs = dict()
 
-        if split_config is None:
-            self.subsequence_directories = list(self.root.glob("*/"))
-        else:
-            available_dirs = list(self.root.glob("*/"))
-            self.subsequence_directories = [self.root / s for s in split_config[split] if self.root / s in available_dirs]
+        available_dirs = list(self.root.glob("*/"))
+        self.subsequence_directories = [self.root / s for s in split_config if self.root / s in available_dirs]
         
         self.subsequence_directories = sorted(self.subsequence_directories, key=self.first_time_from_subsequence)
 
+        self.directories = dict()
+        self.img_idx_track_idxs = dict()
         for f in self.subsequence_directories:
             directory = DSECDirectory(f)
             self.directories[f.name] = directory
-            self.img_idx_track_idxs[f.name] = compute_img_idx_to_track_idx(directory.tracks.tracks['t'],
-                                                                           directory.images.timestamps)
+            self.img_idx_track_idxs[f.name] = compute_img_idx_to_track_idx(
+                directory.tracks.tracks['t'],
+                directory.images.timestamps
+            )
 
     def first_time_from_subsequence(self, subsequence):
         return np.genfromtxt(subsequence / "images/timestamps.txt", dtype="int64")[0]
