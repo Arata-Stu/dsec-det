@@ -29,4 +29,5 @@ if __name__ == '__main__':
 
     # DSECDetクラスにmodeに基づいたsplitを設定してインスタンスを作成
     dataset = DSECDet(root_dir, split_config=chosen_split, sync="back", debug=True)
+    print(len(dataset))
     
