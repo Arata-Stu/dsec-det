@@ -1,60 +1,26 @@
-from pathlib import Path 
-import cv2
 import numpy as np
-from dsec_det.directory import DSECDirectory
+import cv2
+import torch
+from torch.utils.data import Dataset
+from pathlib import Path
+from .directory import DSECDirectory
+from .preprocessing import compute_img_idx_to_track_idx
+from .io import extract_from_h5_by_timewindow
 
-from dsec_det.preprocessing import compute_img_idx_to_track_idx
-from dsec_det.io import extract_from_h5_by_timewindow
-from dsec_det.visualize import render_object_detections_on_image, render_events_on_image
-from dsec_det.label import CLASSES
+class DsecDetDataset(Dataset):
 
-
-class DSECDet:
-    def __init__(self, root, split_config, sync: str="front", debug: bool=False):
-        """
-        root: Root to the the DSEC dataset (the one that contains 'train' and 'test'
-        split: Can be one of ['train', 'test']
-        window_size: Number of microseconds of data
-        sync: Can be either 'front' (last event ts), or 'back' (first event ts). Whether the front of the window or
-              the back of the window is synced with the images.
-
-        Each sample of this dataset loads one image, events, and labels at a timestamp. The behavior is different for 
-        sync='front' and sync='back', and these are visualized below.
-
-        Legend: 
-        . = events
-        | = image
-        L = label
-
-        sync='front'
-        -------> time
-        .......|
-               L
-
-        sync='back'
-        -------> time
-        |.......
-               L
-        
-        """
-        assert root.exists()
-        assert sync in ['front', 'back']
-
-        self.debug = debug
-        self.classes = CLASSES
-
-        self.root = root 
+    def __init__(self, data_dir, split_config, img_size=(256, 256), transform=None, sync="back", use_events=True, use_imgs=True):
+        self.data_dir = Path(data_dir)
+        self.split_config = split_config
+        self.img_size = img_size
+        self.transform = transform
         self.sync = sync
+        self.use_events = use_events
+        self.use_imgs = use_imgs
 
-        self.height = 480
-        self.width = 640
+        available_dirs = list(self.data_dir.glob("*/"))
+        self.subsequence_directories = [self.data_dir / s for s in split_config if self.data_dir / s in available_dirs]
 
-        self.directories = dict()
-        self.img_idx_track_idxs = dict()
-
-        available_dirs = list(self.root.glob("*/"))
-        self.subsequence_directories = [self.root / s for s in split_config if self.root / s in available_dirs]
-        
         self.subsequence_directories = sorted(self.subsequence_directories, key=self.first_time_from_subsequence)
 
         self.directories = dict()
@@ -67,39 +33,38 @@ class DSECDet:
                 directory.images.timestamps
             )
 
-    def first_time_from_subsequence(self, subsequence):
-        return np.genfromtxt(subsequence / "images/timestamps.txt", dtype="int64")[0]
-
     def __len__(self):
-        return sum(len(v)-1 for v in self.img_idx_track_idxs.values())
+        return sum(len(v) - 1 for v in self.img_idx_track_idxs.values())
 
     def __getitem__(self, item):
         output = {}
-        output['image'] = self.get_image(item)
-        output['events'] = self.get_events(item)
+        
+        if self.use_imgs:
+            output['image'] = self.get_image(item)
+        
+        if self.use_events:
+            output['events'] = self.get_events(item)
+        
         output['tracks'] = self.get_tracks(item)
+        output['img_info'] = (480, 640)
+        output['img_id'] = 0
 
-        if self.debug:
-            # visualize tracks and events
-            events = output['events']
-            image = (255 * (output['image'].astype("float32") / 255) ** (1/2.2)).astype("uint8")
-            output['debug'] = render_events_on_image(image, x=events['x'], y=events['y'], p=events['p'])
-            output['debug'] = render_object_detections_on_image(output['debug'], output['tracks'])
-
-        return output
-
-    def get_index_window(self, index, num_idx, sync="back"):
-        if sync == "front":
-            assert 0 < index < num_idx
-            i_0 = index - 1
-            i_1 = index
+        if self.transform is not None:
+            img, target, info, id = self.transform(output) 
         else:
-            assert 0 <= index < num_idx - 1
-            i_0 = index
-            i_1 = index + 1
+            img, target, info, id = output['image'], output['tracks'], output['img_info'], output['img_id']
 
-        return i_0, i_1
-
+        return img, target, info, id
+    
+    def first_time_from_subsequence(self, subsequence):
+        return np.genfromtxt(subsequence / "images/timestamps.txt", dtype="int64")[0]
+    
+    def get_image(self, index, directory_name=None):
+        index, img_idx_to_track_idx, directory = self.rel_index(index, directory_name)
+        image_files = directory.images.image_files_distorted
+        image = cv2.imread(str(image_files[index]))
+        return image
+    
     def get_tracks(self, index, mask=None, directory_name=None):
         index, img_idx_to_track_idx, directory = self.rel_index(index, directory_name)
         i_0, i_1 = self.get_index_window(index, len(img_idx_to_track_idx), sync=self.sync)
@@ -117,12 +82,18 @@ class DSECDet:
         t_0, t_1 = directory.images.timestamps[[i_0, i_1]]
         events = extract_from_h5_by_timewindow(directory.events.event_file, t_0, t_1)
         return events
+    
+    def get_index_window(self, index, num_idx, sync="back"):
+        if sync == "front":
+            assert 0 < index < num_idx
+            i_0 = index - 1
+            i_1 = index
+        else:
+            assert 0 <= index < num_idx - 1
+            i_0 = index
+            i_1 = index + 1
 
-    def get_image(self, index, directory_name=None):
-        index, img_idx_to_track_idx, directory = self.rel_index(index, directory_name)
-        image_files = directory.images.image_files_distorted
-        image = cv2.imread(str(image_files[index]))
-        return image
+        return i_0, i_1
 
     def rel_index(self, index, directory_name=None):
         if directory_name is not None:
@@ -132,8 +103,8 @@ class DSECDet:
 
         for f in self.subsequence_directories:
             img_idx_to_track_idx = self.img_idx_track_idxs[f.name]
-            if len(img_idx_to_track_idx)-1 <= index:
-                index -= (len(img_idx_to_track_idx)-1)
+            if len(img_idx_to_track_idx) - 1 <= index:
+                index -= (len(img_idx_to_track_idx) - 1)
                 continue
             else:
                 return index, img_idx_to_track_idx, self.directories[f.name]

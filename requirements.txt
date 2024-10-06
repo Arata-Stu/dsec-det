@@ -5,3 +5,4 @@ h5py
 hdf5plugin
 numba
 seaborn
+torch

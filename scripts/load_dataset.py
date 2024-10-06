@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 import argparse
 import yaml  # 追加
-from dsec_det.dataset import DSECDet
+from dsec_det.dataset import DsecDetDataset
 
 
 if __name__ == '__main__':
@@ -28,6 +28,6 @@ if __name__ == '__main__':
         raise ValueError("Invalid mode. Choose from 'train', 'val', or 'test'.")
 
     # DSECDetクラスにmodeに基づいたsplitを設定してインスタンスを作成
-    dataset = DSECDet(root_dir, split_config=chosen_split, sync="back", debug=True)
+    dataset = DsecDetDataset(root_dir, split_config=chosen_split, img_size=(480, 640), sync="back", transform=None, use_imgs=True, use_events=True)
     print(len(dataset))
     
