@@ -56,6 +56,43 @@ class DsecDetDataset(Dataset):
 
         return img, target, info, id
     
+    def load_sequence(self, sequence_name):
+        """
+        指定されたシーケンスの全データ（画像、イベント、トラック）をロードします。
+        sequence_name はサブシーケンスディレクトリの名前に対応します。
+        """
+        if sequence_name not in self.directories:
+            raise ValueError(f"指定されたシーケンス '{sequence_name}' は存在しません。")
+
+        directory = self.directories[sequence_name]
+        img_idx_to_track_idx = self.img_idx_track_idxs[sequence_name]
+
+        # シーケンスの全てのデータを格納するリスト
+        images = []
+        events = []
+        tracks = []
+
+        # 各インデックスについてデータを取得
+        for i in range(len(img_idx_to_track_idx) - 1):
+            images.append(self.get_image(i, directory_name=sequence_name))
+            events.append(self.get_events(i, directory_name=sequence_name))
+            tracks.append(self.get_tracks(i, directory_name=sequence_name))
+
+        # 必要に応じて変換処理
+        if self.transform is not None:
+            images, tracks, _, _ = self.transform({
+                'image': images,
+                'tracks': tracks,
+                'img_info': (480, 640),
+                'img_id': 0
+            })
+
+        return {
+            'images': images,
+            'events': events,
+            'tracks': tracks
+        }
+    
     def first_time_from_subsequence(self, subsequence):
         return np.genfromtxt(subsequence / "images/timestamps.txt", dtype="int64")[0]
     
